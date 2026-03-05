@@ -1,5 +1,8 @@
+import logging
 import random
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Demographic dimension pools (Chinese context)
@@ -64,14 +67,29 @@ def _weighted_choice(pool: List[Dict]) -> str:
     return random.choices(labels, weights=weights, k=1)[0]
 
 
-def generate_persona() -> Dict[str, str]:
+def _constrained_choice(pool: List[Dict], allowed: List[str]) -> str:
+    """Choose from pool, restricted to labels listed in *allowed*.
+    Falls back to the full pool if no allowed label matches."""
+    filtered = [item for item in pool if item["label"] in allowed]
+    if not filtered:
+        logger.warning("demographics_config constraint %s matched no pool entries; ignoring", allowed)
+        return _weighted_choice(pool)
+    return _weighted_choice(filtered)
+
+
+def generate_persona(constraints: Optional[Dict[str, Any]] = None) -> Dict[str, str]:
+    def _pick(pool: List[Dict], key: str) -> str:
+        if constraints and key in constraints:
+            return _constrained_choice(pool, constraints[key])
+        return _weighted_choice(pool)
+
     return {
-        "age": _weighted_choice(AGE_GROUPS),
-        "gender": _weighted_choice(GENDERS),
-        "education": _weighted_choice(EDUCATION_LEVELS),
-        "income": _weighted_choice(INCOME_LEVELS),
-        "region": _weighted_choice(REGIONS),
-        "occupation": _weighted_choice(OCCUPATIONS),
+        "age": _pick(AGE_GROUPS, "age"),
+        "gender": _pick(GENDERS, "gender"),
+        "education": _pick(EDUCATION_LEVELS, "education"),
+        "income": _pick(INCOME_LEVELS, "income"),
+        "region": _pick(REGIONS, "region"),
+        "occupation": _pick(OCCUPATIONS, "occupation"),
     }
 
 
@@ -85,7 +103,8 @@ def persona_to_prompt(persona: Dict[str, str], questionnaire_json: Dict[str, Any
     questions_text = _format_questions(questionnaire_json.get("questions", []))
     system_msg = (
         "你是一位真实的问卷调查受访者，请根据你的个人背景，认真且自然地回答以下问卷中的每一道题目。"
-        "你的回答应该符合你的年龄、教育程度、职业和收入水平，体现真实的个体差异。"
+        "你的回答应该符合你的年龄、教育程度、职业和收入水平，体现真实的个体差异。\n"
+        "请用中文回答所有问题。\n"
         "请以 JSON 格式返回，格式如下：\n"
         '{"answers": [{"question_id": "q1", "answer": "你的回答"}, ...]}'
     )
@@ -108,10 +127,28 @@ def _format_questions(questions: List[Dict]) -> str:
         line = f"{qid}. [{qtype}] {text}"
         if options:
             line += "\n   选项：" + "、".join(options)
+        elif qtype == "rating":
+            line += "\n   （请给出1-5的评分，1为非常不满意/非常不同意，5为非常满意/非常同意）"
         lines.append(line)
     return "\n".join(lines)
 
 
-def generate_personas(count: int, demographics_config: Dict[str, Any] = None) -> List[Dict[str, str]]:
-    """Generate `count` persona dicts, optionally constrained by demographics_config."""
-    return [generate_persona() for _ in range(count)]
+def generate_personas(count: int, demographics_config: Optional[Dict[str, Any]] = None) -> List[Dict[str, str]]:
+    """Generate *count* persona dicts, optionally constrained by demographics_config.
+
+    demographics_config keys (all optional):
+        age        – list of allowed labels from AGE_GROUPS
+        gender     – list of allowed labels from GENDERS
+        education  – list of allowed labels from EDUCATION_LEVELS
+        income     – list of allowed labels from INCOME_LEVELS
+        region     – list of allowed labels from REGIONS
+        occupation – list of allowed labels from OCCUPATIONS
+
+    Example::
+
+        {
+            "gender": ["女性"],
+            "age": ["18-24岁", "25-34岁"],
+        }
+    """
+    return [generate_persona(demographics_config) for _ in range(count)]

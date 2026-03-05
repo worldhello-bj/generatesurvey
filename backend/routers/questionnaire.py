@@ -4,7 +4,6 @@ import logging
 import uuid
 from typing import Optional
 
-import aiofiles
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
