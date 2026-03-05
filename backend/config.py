@@ -32,6 +32,8 @@ class Settings(BaseSettings):
     cors_origins: str = "http://localhost:3000,http://localhost:80"
     redis_task_ttl: int = 1800  # 30 minutes
     download_token_ttl: int = 3600  # 1 hour
+    ai_concurrency: int = 10  # max parallel AI calls
+    max_questionnaire_text_length: int = 8000  # chars sent to AI for parsing
 
     def get_api_keys(self) -> List[str]:
         return [k.strip() for k in self.openai_api_keys.split(",") if k.strip()]

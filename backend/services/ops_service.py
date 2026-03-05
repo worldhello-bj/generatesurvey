@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -45,7 +45,7 @@ async def record(
 
 
 async def get_today_stats(db: AsyncSession) -> Dict[str, Any]:
-    today = datetime.utcnow().date()
+    today = datetime.now(timezone.utc).date()
     result = await db.execute(
         select(
             func.count(OpsRecord.id).label("call_count"),

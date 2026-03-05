@@ -127,7 +127,14 @@ const Dashboard: React.FC = () => {
   };
 
   const trendOption = {
-    tooltip: { trigger: 'axis' },
+    tooltip: {
+      trigger: 'axis',
+      formatter: (params: any[]) =>
+        params.map((p: any) => {
+          const val = p.seriesName === '花费（USD）' ? p.value.toFixed(4) : p.value;
+          return `${p.marker}${p.seriesName}: ${val}`;
+        }).join('<br/>'),
+    },
     legend: { data: ['花费（USD）', '调用次数'] },
     xAxis: { type: 'category', data: trend.map((d) => d.date) },
     yAxis: [
@@ -139,7 +146,7 @@ const Dashboard: React.FC = () => {
         name: '花费（USD）',
         type: 'line',
         smooth: true,
-        data: trend.map((d) => d.cost.toFixed(4)),
+        data: trend.map((d) => d.cost),
         itemStyle: { color: '#1677ff' },
       },
       {

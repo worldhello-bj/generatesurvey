@@ -89,7 +89,7 @@ async def parse_questionnaire(
 
     messages = [
         {"role": "system", "content": PARSE_SYSTEM_PROMPT},
-        {"role": "user", "content": f"请解析以下问卷：\n\n{raw_text[:8000]}"},
+        {"role": "user", "content": f"请解析以下问卷：\n\n{raw_text[:settings.max_questionnaire_text_length]}"},
     ]
 
     try:

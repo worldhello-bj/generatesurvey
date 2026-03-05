@@ -78,7 +78,7 @@ async def _run_generation(
         questions = questionnaire.get("questions", [])
 
         # Run AI calls
-        results = await parallel_chat_completions(prompts, model=settings.openai_model, concurrency=10)
+        results = await parallel_chat_completions(prompts, model=settings.openai_model, concurrency=settings.ai_concurrency)
 
         # Parse and record
         all_answers = []
