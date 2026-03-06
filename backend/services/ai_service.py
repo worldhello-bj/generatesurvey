@@ -50,8 +50,8 @@ async def chat_completion(
     usage = response.usage
     return (
         choice.message.content or "",
-        usage.prompt_tokens,
-        usage.completion_tokens,
+        usage.prompt_tokens if usage else 0,
+        usage.completion_tokens if usage else 0,
     )
 
 

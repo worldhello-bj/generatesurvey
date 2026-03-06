@@ -105,7 +105,7 @@ async def get_records(
         count_query = count_query.where(OpsRecord.model == model)
 
     total_result = await db.execute(count_query)
-    total = total_result.scalar()
+    total = total_result.scalar() or 0
 
     query = query.order_by(OpsRecord.timestamp.desc()).offset((page - 1) * page_size).limit(page_size)
     result = await db.execute(query)
