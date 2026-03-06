@@ -55,3 +55,4 @@ Thumbs.db
 /tmp/*.csv
 /tmp/*.xlsx
 backend/data/ops_records.json
+backend/data/runtime_store.json

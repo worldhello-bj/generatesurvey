@@ -1,10 +1,8 @@
 import asyncio
-import json
 import logging
 import uuid
 from typing import Any, Dict, Optional
 
-import redis.asyncio as aioredis
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
@@ -14,6 +12,7 @@ from services.cleaner_service import parse_survey_response
 from services.export_service import build_dataframe, export_csv, export_excel
 from services.ops_service import record
 from services.population_service import generate_personas, persona_to_prompt
+from services.state_store import get, setex
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -33,21 +32,16 @@ async def start_generation(
 ):
     user_id = request.client.host if request.client else "unknown"
 
-    r = aioredis.from_url(settings.redis_url, decode_responses=True)
-    try:
-        questionnaire_json_str = await r.get(f"questionnaire:{body.task_id}")
-        if not questionnaire_json_str:
-            raise HTTPException(status_code=404, detail="Task not found or expired")
-        questionnaire = json.loads(questionnaire_json_str)
+    questionnaire = await get(f"questionnaire:{body.task_id}")
+    if questionnaire is None:
+        raise HTTPException(status_code=404, detail="Task not found or expired")
 
-        gen_task_id = str(uuid.uuid4())
-        await r.setex(
-            f"gen_status:{gen_task_id}",
-            settings.redis_task_ttl,
-            json.dumps({"status": "pending", "total": body.sample_count, "done": 0, "user_id": user_id, "export_format": body.export_format}),
-        )
-    finally:
-        await r.aclose()
+    gen_task_id = str(uuid.uuid4())
+    await setex(
+        f"gen_status:{gen_task_id}",
+        settings.task_ttl,
+        {"status": "pending", "total": body.sample_count, "done": 0, "user_id": user_id, "export_format": body.export_format},
+    )
 
     # Launch generation in background (pass no db — task creates its own session)
     asyncio.create_task(
@@ -65,9 +59,8 @@ async def _run_generation(
     export_format: str,
     user_id: str,
 ):
-    r = aioredis.from_url(settings.redis_url, decode_responses=True)
     try:
-        await _update_status(r, gen_task_id, "running", 0, sample_count)
+        await _update_status(gen_task_id, "running", 0, sample_count)
 
         personas = generate_personas(sample_count, demographics_config)
         prompts = [persona_to_prompt(p, questionnaire) for p in personas]
@@ -89,7 +82,7 @@ async def _run_generation(
             total_completion_tokens += ct
             if content:
                 success_count += 1
-            await _update_status(r, gen_task_id, "running", i + 1, sample_count)
+            await _update_status(gen_task_id, "running", i + 1, sample_count)
 
         # Record ops
         try:
@@ -117,34 +110,27 @@ async def _run_generation(
             filename = "survey_results.csv"
 
         download_token = str(uuid.uuid4())
-        await r.setex(
+        await setex(
             f"download:{download_token}",
             settings.download_token_ttl,
-            json.dumps({"file_path": file_path, "mime": mime, "filename": filename}),
+            {"file_path": file_path, "mime": mime, "filename": filename},
         )
 
-        await _update_status(r, gen_task_id, "completed", sample_count, sample_count, download_token=download_token)
+        await _update_status(gen_task_id, "completed", sample_count, sample_count, download_token=download_token)
 
     except Exception as exc:
         logger.error("Generation failed: %s", exc)
-        await _update_status(r, gen_task_id, "failed", 0, sample_count, error=str(exc))
-    finally:
-        await r.aclose()
+        await _update_status(gen_task_id, "failed", 0, sample_count, error=str(exc))
 
 
-async def _update_status(r, gen_task_id: str, status: str, done: int, total: int, **extra):
+async def _update_status(gen_task_id: str, status: str, done: int, total: int, **extra):
     data = {"status": status, "done": done, "total": total, **extra}
-    await r.setex(f"gen_status:{gen_task_id}", settings.redis_task_ttl, json.dumps(data))
+    await setex(f"gen_status:{gen_task_id}", settings.task_ttl, data)
 
 
 @router.get("/status/{gen_task_id}")
 async def get_status(gen_task_id: str):
-    r = aioredis.from_url(settings.redis_url, decode_responses=True)
-    try:
-        raw = await r.get(f"gen_status:{gen_task_id}")
-        if not raw:
-            raise HTTPException(status_code=404, detail="Task not found or expired")
-        data = json.loads(raw)
-    finally:
-        await r.aclose()
+    data = await get(f"gen_status:{gen_task_id}")
+    if data is None:
+        raise HTTPException(status_code=404, detail="Task not found or expired")
     return {"success": True, **data}

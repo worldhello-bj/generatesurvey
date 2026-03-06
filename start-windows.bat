@@ -48,7 +48,7 @@ if not exist ".env" (
   if exist ".env.example" (
     copy /Y ".env.example" ".env" >nul
     echo [INFO] 未找到 .env，已从 .env.example 自动创建。
-    echo [INFO] 请将 REDIS_URL 改为本机地址（localhost）后重新执行脚本。
+    echo [INFO] 请补充 .env 中的有效配置后重新执行脚本。
     exit /b 0
   ) else (
     echo [ERROR] 未找到 .env 且不存在 .env.example。
@@ -56,7 +56,6 @@ if not exist ".env" (
   )
 )
 
-echo [INFO] 请确保本机 Redis 已启动（非 Docker）。
 echo [INFO] 正在启动后端与前端（将打开两个新窗口）...
 
 if not exist "%BACKEND_DIR%\" (
@@ -88,7 +87,7 @@ echo   start-windows.bat
 echo.
 echo 说明:
 echo   在 Windows 本机环境启动后端+前端，不使用 Docker。
-echo   依赖本机 Redis。
+echo   无需本机数据库或 Redis。
 exit /b 0
 
 :unknown

@@ -188,6 +188,6 @@ start-windows.bat
 ```
 
 说明：
-- 需要本机已安装并启动 Redis；
-- 首次运行若不存在 `.env`，会自动生成并提示将 `REDIS_URL` 改为 `localhost` 后重试；
+- 无需本机数据库或 Redis；
+- 首次运行若不存在 `.env`，会自动生成并提示补充有效配置后重试；
 - 脚本会分别拉起后端（`http://localhost:8000`）与前端（`http://localhost:3000`）。

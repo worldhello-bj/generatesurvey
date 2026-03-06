@@ -11,7 +11,7 @@ usage() {
   ./start.sh [--detach|-d]
 
 说明:
-  使用 Docker Compose 启动项目依赖与服务（postgres/redis/backend/frontend）。
+  使用 Docker Compose 启动项目服务（backend/frontend）。
 
 选项:
   -d, --detach  后台启动（等同 docker compose up -d）
