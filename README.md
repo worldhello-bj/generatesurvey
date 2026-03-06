@@ -180,3 +180,14 @@ chmod +x ./start.sh
 ```
 
 首次运行若不存在 `.env`，脚本会自动基于 `.env.example` 生成 `.env`，请先补充有效配置后再重新执行启动命令。
+
+Windows 本机（不使用 Docker）可使用：
+
+```bat
+start-windows.bat
+```
+
+说明：
+- 需要本机已安装并启动 PostgreSQL、Redis；
+- 首次运行若不存在 `.env`，会自动生成并提示将 `DATABASE_URL`、`REDIS_URL` 改为 `localhost` 后重试；
+- 脚本会分别拉起后端（`http://localhost:8000`）与前端（`http://localhost:3000`）。
