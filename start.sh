@@ -52,5 +52,7 @@ else
   exit 1
 fi
 
-echo "执行: ${COMPOSE_CMD[*]} ${COMPOSE_ARGS[*]}"
+printf '执行：'
+printf ' %q' "${COMPOSE_CMD[@]}" "${COMPOSE_ARGS[@]}"
+printf '\n'
 "${COMPOSE_CMD[@]}" "${COMPOSE_ARGS[@]}"
