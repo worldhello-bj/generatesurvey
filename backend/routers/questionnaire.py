@@ -4,11 +4,9 @@ import logging
 import uuid
 from typing import Optional
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
-from sqlalchemy.ext.asyncio import AsyncSession
+from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 
 from config import settings
-from database import get_db
 from services.ai_service import chat_completion
 from services.cleaner_service import parse_questionnaire_response
 from services.ops_service import record
@@ -74,7 +72,6 @@ async def parse_questionnaire(
     request: Request,
     file: Optional[UploadFile] = File(None),
     text: Optional[str] = Form(None),
-    db: AsyncSession = Depends(get_db),
 ):
     if file is None and not text:
         raise HTTPException(status_code=400, detail="Either file or text must be provided")
@@ -122,7 +119,6 @@ async def parse_questionnaire(
         logger.warning("Redis store failed: %s", exc)
 
     await record(
-        db,
         task_type="parse_questionnaire",
         model=settings.parse_model,
         prompt_tokens=prompt_tokens,

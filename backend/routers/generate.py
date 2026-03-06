@@ -5,12 +5,10 @@ import uuid
 from typing import Any, Dict, Optional
 
 import redis.asyncio as aioredis
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import settings
-from database import get_db, _get_engine
 from services.ai_service import parallel_chat_completions
 from services.cleaner_service import parse_survey_response
 from services.export_service import build_dataframe, export_csv, export_excel
@@ -32,7 +30,6 @@ class StartRequest(BaseModel):
 async def start_generation(
     body: StartRequest,
     request: Request,
-    db: AsyncSession = Depends(get_db),
 ):
     user_id = request.client.host if request.client else "unknown"
 
@@ -94,21 +91,17 @@ async def _run_generation(
                 success_count += 1
             await _update_status(r, gen_task_id, "running", i + 1, sample_count)
 
-        # Record ops using a fresh session
+        # Record ops
         try:
-            _, session_factory = _get_engine()
-            async with session_factory() as db_session:
-                await record(
-                    db_session,
-                    task_type="generate_response",
-                    model=settings.openai_model,
-                    prompt_tokens=total_prompt_tokens,
-                    completion_tokens=total_completion_tokens,
-                    success=(success_count > 0),
-                    user_id=user_id,
-                    metadata={"sample_count": sample_count, "success_count": success_count},
-                )
-                await db_session.commit()
+            await record(
+                task_type="generate_response",
+                model=settings.openai_model,
+                prompt_tokens=total_prompt_tokens,
+                completion_tokens=total_completion_tokens,
+                success=(success_count > 0),
+                user_id=user_id,
+                metadata={"sample_count": sample_count, "success_count": success_count},
+            )
         except Exception as exc:
             logger.error("Ops record failed: %s", exc)
 

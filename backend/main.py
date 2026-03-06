@@ -4,7 +4,6 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from config import settings
-from database import init_db
 from routers import admin_router, download_router, generate_router, questionnaire_router
 
 logging.basicConfig(level=logging.INFO)
@@ -28,16 +27,6 @@ app.include_router(questionnaire_router, prefix="/questionnaire", tags=["questio
 app.include_router(generate_router, prefix="/generate", tags=["generate"])
 app.include_router(download_router, prefix="/download", tags=["download"])
 app.include_router(admin_router, prefix="/admin", tags=["admin"])
-
-
-@app.on_event("startup")
-async def on_startup():
-    try:
-        await init_db()
-        logger.info("Database initialized")
-    except Exception as exc:
-        logger.warning("DB init failed (may not be available): %s", exc)
-
 
 @app.get("/health")
 async def health():
