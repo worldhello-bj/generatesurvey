@@ -1,17 +1,15 @@
 import io
-import json
 import logging
 import uuid
 from typing import Optional
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
-from sqlalchemy.ext.asyncio import AsyncSession
+from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 
 from config import settings
-from database import get_db
 from services.ai_service import chat_completion
 from services.cleaner_service import parse_questionnaire_response
 from services.ops_service import record
+from services.state_store import setex
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -74,7 +72,6 @@ async def parse_questionnaire(
     request: Request,
     file: Optional[UploadFile] = File(None),
     text: Optional[str] = Form(None),
-    db: AsyncSession = Depends(get_db),
 ):
     if file is None and not text:
         raise HTTPException(status_code=400, detail="Either file or text must be provided")
@@ -108,21 +105,13 @@ async def parse_questionnaire(
 
     parsed = parse_questionnaire_response(content)
 
-    # Store parsed questionnaire in Redis temporarily
+    # Store parsed questionnaire temporarily
     try:
-        import redis.asyncio as aioredis
-        r = aioredis.from_url(settings.redis_url, decode_responses=True)
-        await r.setex(
-            f"questionnaire:{task_id}",
-            settings.redis_task_ttl,
-            json.dumps(parsed),
-        )
-        await r.aclose()
+        await setex(f"questionnaire:{task_id}", settings.task_ttl, parsed)
     except Exception as exc:
-        logger.warning("Redis store failed: %s", exc)
+        logger.warning("Temporary questionnaire store failed: %s", exc)
 
     await record(
-        db,
         task_type="parse_questionnaire",
         model=settings.parse_model,
         prompt_tokens=prompt_tokens,

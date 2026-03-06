@@ -1,12 +1,10 @@
-import json
 import logging
 import os
 
-import redis.asyncio as aioredis
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 
-from config import settings
+from services.state_store import delete, get
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -14,21 +12,16 @@ router = APIRouter()
 
 @router.get("/{token}")
 async def download_file(token: str):
-    r = aioredis.from_url(settings.redis_url, decode_responses=True)
-    try:
-        raw = await r.get(f"download:{token}")
-        if not raw:
-            raise HTTPException(status_code=404, detail="Download link not found or expired")
+    info = await get(f"download:{token}")
+    if info is None:
+        raise HTTPException(status_code=404, detail="Download link not found or expired")
 
-        info = json.loads(raw)
-        file_path = info["file_path"]
-        mime = info.get("mime", "application/octet-stream")
-        filename = info.get("filename", "download")
+    file_path = info["file_path"]
+    mime = info.get("mime", "application/octet-stream")
+    filename = info.get("filename", "download")
 
-        # One-time: delete the token immediately
-        await r.delete(f"download:{token}")
-    finally:
-        await r.aclose()
+    # One-time: delete the token immediately
+    await delete(f"download:{token}")
 
     if not os.path.exists(file_path):
         raise HTTPException(status_code=404, detail="File no longer available")

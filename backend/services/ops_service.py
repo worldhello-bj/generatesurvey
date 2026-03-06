@@ -1,18 +1,65 @@
+import asyncio
+import json
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Any, Dict, Optional
 
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, cast, Date
-
-from models.ops import OpsRecord
 from config import settings
 
 logger = logging.getLogger(__name__)
+_OPS_FILE = Path(__file__).resolve().parents[1] / "data" / "ops_records.json"
+_OPS_LOCK = asyncio.Lock()
+_MIN_TS = datetime.min.replace(tzinfo=timezone.utc)
+
+
+def _ensure_file() -> None:
+    _OPS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    if not _OPS_FILE.exists():
+        _OPS_FILE.write_text("[]", encoding="utf-8")
+
+
+def _load_records() -> list[Dict[str, Any]]:
+    _ensure_file()
+    try:
+        data = json.loads(_OPS_FILE.read_text(encoding="utf-8"))
+        return data if isinstance(data, list) else []
+    except Exception:
+        logger.warning("Failed to load ops records file %s, reset to empty list.", _OPS_FILE, exc_info=True)
+        return []
+
+
+def _save_records(records: list[Dict[str, Any]]) -> None:
+    _ensure_file()
+    tmp_file = _OPS_FILE.with_suffix(".tmp")
+    tmp_file.write_text(json.dumps(records, ensure_ascii=False, indent=2), encoding="utf-8")
+    tmp_file.replace(_OPS_FILE)
+
+
+def _parse_ts(value: Optional[str]) -> Optional[datetime]:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value)
+    except ValueError:
+        return None
+
+
+def _as_int(value: Any, default: int = 0) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _as_float(value: Any, default: float = 0.0) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
 
 
 async def record(
-    db: AsyncSession,
     task_type: str,
     model: str,
     prompt_tokens: int,
@@ -26,90 +73,97 @@ async def record(
         prompt_tokens / 1000 * settings.prompt_token_price
         + completion_tokens / 1000 * settings.completion_token_price
     )
-    rec = OpsRecord(
-        task_type=task_type,
-        user_id=user_id,
-        model=model,
-        prompt_tokens=prompt_tokens,
-        completion_tokens=completion_tokens,
-        total_tokens=total,
-        cost=cost,
-        success=success,
-        metadata_=metadata,
-    )
-    db.add(rec)
-    try:
-        await db.flush()
-    except Exception as exc:
-        logger.error("Failed to write ops record: %s", exc)
+    async with _OPS_LOCK:
+        records = _load_records()
+        next_id = max((_as_int(r.get("id", 0), default=0) for r in records), default=0) + 1
+        records.append(
+            {
+                "id": next_id,
+                "task_type": task_type,
+                "user_id": user_id,
+                "model": model,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "prompt_tokens": prompt_tokens,
+                "completion_tokens": completion_tokens,
+                "total_tokens": total,
+                "cost": cost,
+                "success": success,
+                "metadata": metadata or {},
+            }
+        )
+        _save_records(records)
 
 
-async def get_today_stats(db: AsyncSession) -> Dict[str, Any]:
+async def get_today_stats() -> Dict[str, Any]:
     today = datetime.now(timezone.utc).date()
-    result = await db.execute(
-        select(
-            func.count(OpsRecord.id).label("call_count"),
-            func.coalesce(func.sum(OpsRecord.cost), 0).label("total_cost"),
-            func.coalesce(func.sum(OpsRecord.total_tokens), 0).label("total_tokens"),
-            func.count(func.distinct(OpsRecord.user_id)).label("unique_users"),
-        ).where(cast(OpsRecord.timestamp, Date) == today)
-    )
-    row = result.one()
+    async with _OPS_LOCK:
+        records = _load_records()
+
+    today_records = []
+    for rec in records:
+        ts = _parse_ts(rec.get("timestamp"))
+        if ts and ts.date() == today:
+            today_records.append(rec)
+
     return {
-        "call_count": row.call_count,
-        "total_cost": float(row.total_cost),
-        "total_tokens": int(row.total_tokens),
-        "unique_users": row.unique_users,
+        "call_count": len(today_records),
+        "total_cost": float(sum(_as_float(r.get("cost", 0), default=0.0) for r in today_records)),
+        "total_tokens": int(sum(_as_int(r.get("total_tokens", 0), default=0) for r in today_records)),
+        "unique_users": len({r.get("user_id") for r in today_records if r.get("user_id")}),
     }
 
 
-async def get_cost_trend(db: AsyncSession, days: int = 7) -> list:
-    from sqlalchemy import text
-    sql = text(
-        """
-        SELECT DATE(timestamp) as day,
-               COALESCE(SUM(cost), 0) as daily_cost,
-               COUNT(*) as call_count
-        FROM ops_records
-        WHERE timestamp >= (NOW() - INTERVAL '1 day' * :days)
-        GROUP BY day
-        ORDER BY day
-        """
-    )
-    result = await db.execute(sql, {"days": days})
+async def get_cost_trend(days: int = 7) -> list:
+    async with _OPS_LOCK:
+        records = _load_records()
+
+    end_date = datetime.now(timezone.utc).date()
+    start_date = end_date - timedelta(days=max(days - 1, 0))
+    trend = {
+        (start_date + timedelta(days=i)): {"cost": 0.0, "calls": 0}
+        for i in range((end_date - start_date).days + 1)
+    }
+
+    for rec in records:
+        ts = _parse_ts(rec.get("timestamp"))
+        if not ts:
+            continue
+        day = ts.date()
+        if day in trend:
+            trend[day]["cost"] += _as_float(rec.get("cost", 0), default=0.0)
+            trend[day]["calls"] += 1
+
     return [
-        {"date": str(row.day), "cost": float(row.daily_cost), "calls": int(row.call_count)}
-        for row in result
+        {"date": day.isoformat(), "cost": values["cost"], "calls": values["calls"]}
+        for day, values in sorted(trend.items(), key=lambda x: x[0])
     ]
 
 
 async def get_records(
-    db: AsyncSession,
     page: int = 1,
     page_size: int = 20,
     task_type: Optional[str] = None,
     user_id: Optional[str] = None,
     model: Optional[str] = None,
 ) -> Dict[str, Any]:
-    query = select(OpsRecord)
-    count_query = select(func.count(OpsRecord.id))
+    async with _OPS_LOCK:
+        records = _load_records()
 
-    if task_type:
-        query = query.where(OpsRecord.task_type == task_type)
-        count_query = count_query.where(OpsRecord.task_type == task_type)
-    if user_id:
-        query = query.where(OpsRecord.user_id == user_id)
-        count_query = count_query.where(OpsRecord.user_id == user_id)
-    if model:
-        query = query.where(OpsRecord.model == model)
-        count_query = count_query.where(OpsRecord.model == model)
+    filtered = []
+    for rec in records:
+        if task_type and rec.get("task_type") != task_type:
+            continue
+        if user_id and rec.get("user_id") != user_id:
+            continue
+        if model and rec.get("model") != model:
+            continue
+        filtered.append(rec)
 
-    total_result = await db.execute(count_query)
-    total = total_result.scalar() or 0
-
-    query = query.order_by(OpsRecord.timestamp.desc()).offset((page - 1) * page_size).limit(page_size)
-    result = await db.execute(query)
-    records = result.scalars().all()
+    filtered.sort(key=lambda r: _parse_ts(r.get("timestamp")) or _MIN_TS, reverse=True)
+    total = len(filtered)
+    start = (page - 1) * page_size
+    end = start + page_size
+    page_items = filtered[start:end]
 
     return {
         "total": total,
@@ -117,17 +171,17 @@ async def get_records(
         "page_size": page_size,
         "items": [
             {
-                "id": r.id,
-                "task_type": r.task_type,
-                "user_id": r.user_id,
-                "model": r.model,
-                "timestamp": r.timestamp.isoformat() if r.timestamp else None,
-                "prompt_tokens": r.prompt_tokens,
-                "completion_tokens": r.completion_tokens,
-                "total_tokens": r.total_tokens,
-                "cost": r.cost,
-                "success": r.success,
+                "id": r.get("id"),
+                "task_type": r.get("task_type"),
+                "user_id": r.get("user_id"),
+                "model": r.get("model"),
+                "timestamp": r.get("timestamp"),
+                "prompt_tokens": _as_int(r.get("prompt_tokens", 0), default=0),
+                "completion_tokens": _as_int(r.get("completion_tokens", 0), default=0),
+                "total_tokens": _as_int(r.get("total_tokens", 0), default=0),
+                "cost": _as_float(r.get("cost", 0), default=0.0),
+                "success": bool(r.get("success", False)),
             }
-            for r in records
+            for r in page_items
         ],
     }

@@ -2,12 +2,9 @@ import logging
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from fastapi.security import OAuth2PasswordRequestForm
 from pydantic import BaseModel
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import settings
-from database import get_db
 from services.ops_service import get_cost_trend, get_records, get_today_stats
 from utils.auth import create_access_token, get_current_admin
 
@@ -34,9 +31,8 @@ async def login(body: LoginRequest):
 @router.get("/stats")
 async def get_stats(
     _: str = Depends(get_current_admin),
-    db: AsyncSession = Depends(get_db),
 ):
-    stats = await get_today_stats(db)
+    stats = await get_today_stats()
     return {"success": True, "data": stats}
 
 
@@ -48,9 +44,8 @@ async def list_records(
     user_id: Optional[str] = None,
     model: Optional[str] = None,
     _: str = Depends(get_current_admin),
-    db: AsyncSession = Depends(get_db),
 ):
-    data = await get_records(db, page=page, page_size=page_size, task_type=task_type, user_id=user_id, model=model)
+    data = await get_records(page=page, page_size=page_size, task_type=task_type, user_id=user_id, model=model)
     return {"success": True, **data}
 
 
@@ -58,7 +53,6 @@ async def list_records(
 async def cost_trend(
     days: int = 7,
     _: str = Depends(get_current_admin),
-    db: AsyncSession = Depends(get_db),
 ):
-    data = await get_cost_trend(db, days=days)
+    data = await get_cost_trend(days=days)
     return {"success": True, "data": data}

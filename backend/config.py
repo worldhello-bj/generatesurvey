@@ -8,9 +8,6 @@ class Settings(BaseSettings):
     # Database
     database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/surveydb"
 
-    # Redis
-    redis_url: str = "redis://localhost:6379/0"
-
     # OpenAI
     openai_api_keys: str = ""  # comma-separated list of API keys
     openai_base_url: str = "https://api.openai.com/v1"
@@ -30,7 +27,7 @@ class Settings(BaseSettings):
 
     # App
     cors_origins: str = "http://localhost:3000,http://localhost:80"
-    redis_task_ttl: int = 1800  # 30 minutes
+    task_ttl: int = 1800  # 30 minutes
     download_token_ttl: int = 3600  # 1 hour
     ai_concurrency: int = 10  # max parallel AI calls
     max_questionnaire_text_length: int = 8000  # chars sent to AI for parsing
